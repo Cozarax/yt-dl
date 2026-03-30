@@ -1,0 +1,8 @@
+bin/
+downloads/
+temp/
+build/
+dist/
+__pycache__/
+*.spec
+*.pyc
