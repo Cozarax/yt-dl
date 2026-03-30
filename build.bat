@@ -44,7 +44,7 @@ echo.
 echo Creation de FetchUrl.zip...
 if exist "FetchUrl.zip" del "FetchUrl.zip"
 
-powershell -Command " $zip = [System.IO.Compression.ZipFile]; Add-Type -Assembly 'System.IO.Compression.FileSystem'; $archive = [System.IO.Compression.ZipFile]::Open('FetchUrl.zip', 'Create'); [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, 'FetchUrl.exe', 'FetchUrl/FetchUrl.exe'); [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, 'bin\yt-dlp.exe', 'FetchUrl/bin/yt-dlp.exe'); [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, 'bin\ffmpeg.exe', 'FetchUrl/bin/ffmpeg.exe'); $archive.Dispose()"
+powershell -Command "Add-Type -Assembly 'System.IO.Compression.FileSystem'; $archive = [System.IO.Compression.ZipFile]::Open('FetchUrl.zip', 'Create'); [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, 'FetchUrl.exe', 'FetchUrl/FetchUrl.exe'); [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, 'bin\yt-dlp.exe', 'FetchUrl/bin/yt-dlp.exe'); [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, 'bin\ffmpeg.exe', 'FetchUrl/bin/ffmpeg.exe'); $archive.Dispose()"
 
 if %errorlevel% neq 0 (
   echo [ERREUR] La creation du zip a echoue.

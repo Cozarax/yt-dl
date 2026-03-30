@@ -35,8 +35,11 @@ class App(ctk.CTk):
         self.geometry("700x560")
         self.minsize(600, 480)
         self.resizable(True, True)
+        self._process = None    # process yt-dlp en cours
+        self._cancelled = False  # flag pour distinguer annulation et erreur
         self._build_ui()
         self._check_binaries()
+        self._update_ytdlp_at_startup()
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
@@ -60,7 +63,7 @@ class App(ctk.CTk):
         url_frame.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(url_frame, text="URL de la vidéo", font=ctk.CTkFont(size=13)).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 6)
         )
 
         self.url_var = ctk.StringVar()
@@ -82,7 +85,22 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=13, weight="bold"),
             command=self._start_download,
         )
-        self.btn_download.grid(row=1, column=1)
+        self.btn_download.grid(row=1, column=1, padx=(0, 8))
+
+        self.btn_cancel = ctk.CTkButton(
+            url_frame,
+            text="Annuler",
+            height=40,
+            width=100,
+            font=ctk.CTkFont(size=13),
+            fg_color="transparent",
+            border_width=1,
+            text_color=("gray60", "gray40"),
+            border_color=("gray60", "gray40"),
+            state="disabled",
+            command=self._cancel_download,
+        )
+        self.btn_cancel.grid(row=1, column=2)
 
         # --- Barre de progression ---
         progress_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -108,13 +126,28 @@ class App(ctk.CTk):
         self.log.grid(row=3, column=0, padx=24, pady=(12, 0), sticky="nsew")
 
         # --- Barre de statut ---
+        status_frame = ctk.CTkFrame(self, fg_color="transparent")
+        status_frame.grid(row=4, column=0, padx=24, pady=(8, 16), sticky="ew")
+
         self.status_var = ctk.StringVar(value="Prêt.")
         ctk.CTkLabel(
-            self,
+            status_frame,
             textvariable=self.status_var,
             font=ctk.CTkFont(size=12),
             text_color="gray",
-        ).grid(row=4, column=0, padx=24, pady=(8, 16), sticky="w")
+        ).pack(side="left")
+
+        self.btn_open_folder = ctk.CTkButton(
+            status_frame,
+            text="Ouvrir le dossier",
+            height=28,
+            width=130,
+            font=ctk.CTkFont(size=12),
+            fg_color="transparent",
+            border_width=1,
+            command=self._open_downloads_folder,
+        )
+        # Le bouton est caché par défaut, il apparaît après un téléchargement réussi
 
     def _check_binaries(self):
         missing = []
@@ -127,6 +160,21 @@ class App(ctk.CTk):
         if missing:
             self.btn_download.configure(state="disabled")
             self.status_var.set("Binaires manquants — lance setup.bat d'abord.")
+
+    def _update_ytdlp_at_startup(self):
+        # Mise à jour silencieuse de yt-dlp au démarrage, en arrière-plan
+        threading.Thread(target=self._run_ytdlp_update, daemon=True).start()
+
+    def _run_ytdlp_update(self):
+        try:
+            subprocess.run(
+                [YTDLP_EXE, "-U"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception:
+            pass  # La mise à jour est optionnelle, on ne bloque pas l'app
 
     def _append_log(self, text):
         self.log.configure(state="normal")
@@ -141,7 +189,10 @@ class App(ctk.CTk):
             return
 
         self.btn_download.configure(state="disabled")
+        self.btn_cancel.configure(state="normal")
+        self.btn_open_folder.pack_forget()
         self.url_entry.configure(state="disabled")
+        self._cancelled = False
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
@@ -153,13 +204,22 @@ class App(ctk.CTk):
 
         threading.Thread(target=self._run_download, args=(url,), daemon=True).start()
 
+    def _cancel_download(self):
+        self._cancelled = True
+        if self._process and self._process.poll() is None:
+            # taskkill /F /T tue le process et tous ses enfants (ffmpeg inclus)
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(self._process.pid)],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                capture_output=True,
+            )
+
     def _run_download(self, url):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         os.makedirs(TEMP_DIR, exist_ok=True)
 
         cmd = [
             YTDLP_EXE,
-            "-U",
             "-S", "res:1080,codec:avc,fps,br",
             "-f", "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/best",
             "--merge-output-format", "mp4",
@@ -175,7 +235,7 @@ class App(ctk.CTk):
         ]
 
         try:
-            process = subprocess.Popen(
+            self._process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -187,7 +247,7 @@ class App(ctk.CTk):
 
             determinate_started = False
 
-            for line in process.stdout:
+            for line in self._process.stdout:
                 self.after(0, self._append_log, line)
 
                 match = PROGRESS_RE.search(line)
@@ -198,13 +258,14 @@ class App(ctk.CTk):
                         determinate_started = True
                     self.after(0, self._update_progress, percent)
 
-            process.wait()
-            success = process.returncode == 0
+            self._process.wait()
+            success = self._process.returncode == 0
 
         except Exception as exc:
             self.after(0, self._append_log, f"[ERREUR] {exc}\n")
             success = False
 
+        self._process = None
         self.after(0, self._on_done, success)
 
     def _switch_to_determinate(self):
@@ -215,17 +276,29 @@ class App(ctk.CTk):
         self.progress.set(percent / 100)
         self.pct_label.configure(text=f"{int(percent)}%")
 
+    def _open_downloads_folder(self):
+        os.startfile(OUTPUT_DIR)
+
     def _on_done(self, success):
         self.progress.stop()
         self.btn_download.configure(state="normal")
+        self.btn_cancel.configure(state="disabled")
         self.url_entry.configure(state="normal")
+
+        if self._cancelled:
+            self.progress.set(0)
+            self.pct_label.configure(text="")
+            self.status_var.set("Téléchargement annulé.")
+            shutil.rmtree(TEMP_DIR, ignore_errors=True)
+            return
 
         if success:
             self.progress.set(1)
             self.pct_label.configure(text="100%")
             self.url_var.set("")
-            self.status_var.set(f"Terminé ! Fichier dans : {OUTPUT_DIR}")
+            self.status_var.set("Terminé !")
             self._append_log(f"\n--- Terminé. Fichier dans : {OUTPUT_DIR} ---\n")
+            self.btn_open_folder.pack(side="right")
             shutil.rmtree(TEMP_DIR, ignore_errors=True)
         else:
             self.progress.set(0)
