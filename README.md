@@ -1,6 +1,6 @@
 # FetchUrl
 
-Téléchargeur de vidéos simple et rapide. Supporte YouTube, Vimeo, et des centaines d'autres sites.
+Téléchargeur de vidéos simple et rapide. Supporte YouTube, Vimeo, et autres.
 
 ## Télécharger l'application
 
